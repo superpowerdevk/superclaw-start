@@ -97,7 +97,7 @@ def market_wide() -> list:
         pass
     # Altcoin Season Index
     try:
-        d = _cmc_get("/v3/altcoin-season/latest").get("data", {})
+        d = _cmc_get("/v1/altcoin-season-index/latest").get("data", {})
         sidx = d.get("altcoin_index") or d.get("value")
         if sidx is not None:
             regime = "Altcoin Season" if float(sidx) >= 75 else ("Bitcoin Season" if float(sidx) <= 25 else "Neutral")
