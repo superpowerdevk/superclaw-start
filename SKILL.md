@@ -1,5 +1,5 @@
 ---
-name: superclaw-start
+name: superclaw-trader
 description: The all-in-one SuperClaw front door. Use this whenever the user opens SuperClaw, asks for a market update, says "what can you do", or wants to start trading. It shows a live market pulse with a trader-style TLDR, then hand-holds the user into either memecoin trading (Trenches Scout discovery + OKX DEX swap with stop-loss/take-profit) or perpetuals copy-trading (one of the curated perps skills), installing and setting up whatever sub-skill is needed along the way. This skill orchestrates other skills — it never holds funds or trades on its own.
 ---
 
