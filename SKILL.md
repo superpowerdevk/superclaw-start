@@ -9,15 +9,19 @@ This is the single entry point a new user hits. Your job: give them a live read 
 
 > The user may be brand new. Hand-hold. Offer the menu, explain options plainly, confirm before anything that spends money.
 
+## Interaction rules (apply everywhere)
+- Present EVERY user choice as a **numbered menu** — `1) … 2) … 3) …` — and accept the **number** as their answer (also accept the label text). Keep options short.
+- Always confirm before anything that spends money (show the quote/amount first).
+
 ## FIRST ACTION (on invoke — do this immediately, don't wait)
 
-1. **Market pulse.** Run `python3 market_update.py` (in this skill's directory). It returns, with no API keys: live price / 24h% / funding / open interest for BTC, ETH, SOL, BNB, HYPE, GOLD (Hyperliquid), plus market-wide regime — **Fear & Greed, Altcoin Season, total market cap, BTC/ETH dominance** (CoinMarketCap). That single command is your full data set.
-2. **Write the TLDR.** Using ONLY the numbers the script prints, write a 3–5 sentence, **descriptive** trader brief: lead with the risk regime (Fear & Greed + Altcoin Season + dominance), then the biggest movers and any notable funding/OI (crowded longs/shorts). **No buy/sell calls, no price predictions.**
-3. **Offer the fork:** "Want to trade **memes** or **perps**?"
+1. **Run the desk snapshot.** Run `python3 market_update.py` (in this skill's directory). With no API keys it prints a full data set — tracked assets (price/24h/funding/OI), key metrics (mcap/volume/dominance/ETH-BTC ratio), top movers, sentiment (Fear & Greed, Altcoin Season), stablecoin supply + de-peg, and recent headlines — plus embedded instructions for the briefing format.
+2. **Show the dashboard, then add your read.** The script prints a ready-made **dashboard** (emoji status, gauge bars, compact cards). Show **everything above its `[AGENT INSTRUCTIONS]` line to the user EXACTLY as printed** — do not reformat, summarize, or rebuild it. Then append two short sections of your own, using ONLY that data: **📈 Analytics** (BTC support/resistance — flag clearly as YOUR estimates; trend read; cycle read) and **⚖️ Verdict** (risk-on/off, what to watch, conviction low/med/high). The timestamp + sources are already in the dashboard. Descriptive, not advice — no buy/sell calls.
+3. **Offer the fork (numbered):** "What do you want to do? **1) Trade memes  2) Trade perps**"
 
 ## Branch A — PERPS
 
-1. Ask which asset: **BTC, ETH, BNB, HYPE, or GOLD.** (SOL appears in the pulse but perps for it are coming soon — if they pick SOL, tell them it's not available yet and offer the others.)
+1. Ask which asset (numbered): **1) BTC  2) ETH  3) BNB  4) HYPE  5) GOLD.** (SOL appears in the pulse but its perps are coming soon — if asked, say not available yet.)
 2. Map the choice to its skill repo:
    - BTC → `https://github.com/superpowerdevk/superclaw-perps-btc`
    - ETH → `https://github.com/superpowerdevk/superclaw-perps-eth`
@@ -36,9 +40,9 @@ Then:
 1. **Discover.** Run **Trenches Scout** (install `https://github.com/superpowerdevk/superclaw-trenches-scout` first if it isn't present). Get the **tier-1 token**: symbol, **contract address**, and chain. Never invent a token address — it must come from Scout.
 2. **Present it** to the user with a blunt one-line meme-risk warning (these can rug, go to zero, or become unsellable).
 3. **Ask the buy amount:** "Buy this? How much **USDT**?"
-4. **Ask stop loss:** "Set stop loss at **5%, 10%, 15%, or higher**?"
-5. **Ask take profit:** "Set take profit at **5%, 10%, 15%, or higher**?"
-6. **Ask the check interval:** "How often should I check the price to trigger your SL/TP? **every 2 min · 5 min · 10 min · 15 min · 30 min · 1 hour · 4 hours · 12 hours · daily.** Memes move fast — I recommend **2 minutes** unless you have a reason not to."
+4. **Ask stop loss (numbered):** "Stop loss at — **1) 5%  2) 10%  3) 15%  4) higher (tell me)**"
+5. **Ask take profit (numbered):** "Take profit at — **1) 5%  2) 10%  3) 15%  4) higher (tell me)**"
+6. **Ask the check interval (numbered):** "How often should I check the price for your SL/TP? **1) 2 min (recommended for memes)  2) 5 min  3) 10 min  4) 15 min  5) 30 min  6) 1 hour  7) 4 hours  8) 12 hours  9) daily.** Memes move fast — pick 1 unless you have a reason not to."
 7. **Buy** via `okx-dex-swap`: resolve the token address → `swap quote` → show the quote (token, USDT in, expected out, price impact, fees) and **get explicit confirmation** → `swap execute`. Respect the swap skill's safety gates: **honeypot → STOP** and tell the user; **price impact > 5% or high tax → warn and require explicit confirmation.**
 8. **Arm SL/TP.** Record the entry price. Set the recurring price check at the chosen interval. On each check, fetch the current price (`okx-dex-swap swap quote`, or GMGN). If price ≤ entry × (1 − SL%) → **sell all** via `swap execute` (stop-loss hit). If price ≥ entry × (1 + TP%) → **sell all** (take-profit hit). After a fill, stop the schedule. Keep the schedule running until SL or TP triggers.
 9. **Summarize:** token, USDT spent, entry price, SL and TP levels, and the check interval — and remind them they can say "sell now" or "cancel" anytime.
