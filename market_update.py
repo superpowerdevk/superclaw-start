@@ -268,18 +268,21 @@ def main() -> None:
     if nw:
         L += ["", "📰 HEADLINES"] + [f"• {t}" for t in nw]
 
-    L += [
-        "",
-        "[AGENT INSTRUCTIONS — do not print this line]",
-        "Show EVERYTHING above this line to the user exactly as printed — it is the dashboard. "
-        "Then append two short sections of your own, using ONLY the data above:\n"
-        "📈 ANALYTICS — BTC support/resistance (mark these clearly as YOUR estimates), trend read "
+    dashboard = "\n".join(L)
+    instructions = (
+        "[AGENT INSTRUCTIONS — do not print this line]\n"
+        "Output the fenced code block above EXACTLY as printed — keep the ``` fences so every "
+        "line break is preserved. Do NOT convert it to markdown, do NOT bold the headers, do NOT "
+        "merge lines into paragraphs. It is a dashboard; reproduce it verbatim.\n"
+        "Then BELOW the code block, as normal text (not inside any code block), add two short sections "
+        "using ONLY the data above:\n"
+        "📈 ANALYTICS — BTC support/resistance (mark clearly as YOUR estimates), trend read "
         "(accumulation / distribution / ranging / trending), and where we are in the cycle.\n"
         "⚖️ VERDICT — one paragraph: risk-on or risk-off, what to watch next, conviction (low/med/high).\n"
-        "Flag estimates and anything missing; on-chain whale/flow data is NOT in this build — say so if asked, never fabricate. "
-        "End with: 'What now?  1) Trade memes   2) Trade perps'. Sharp, no filler.",
-    ]
-    print("\n".join(L))
+        "Flag estimates and anything missing; on-chain whale/flow data is NOT in this build — say so if "
+        "asked, never fabricate. End with: 'What now?  1) Trade memes   2) Trade perps'. Sharp, no filler."
+    )
+    print("```\n" + dashboard + "\n```\n\n" + instructions)
 
 
 if __name__ == "__main__":
