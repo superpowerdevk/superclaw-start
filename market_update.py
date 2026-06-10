@@ -78,11 +78,11 @@ def _card(label: str, c: dict) -> str:
     m = float(c["markPx"]); ch = _chg(c)
     dot = "🟢" if ch >= 0 else "🔴"
     if label in NO_PERPS:
-        extra = " · perps soon"
+        extra = "_perps soon_"
     else:
         f_apr = float(c.get("funding", 0)) * 24 * 365 * 100
-        extra = f" · fund {f_apr:+.1f}%/yr · OI {_oi(float(c.get('openInterest',0))*m)}"
-    return f"{dot} {label:<4} {_price(m):<9} {ch:+.1f}%{extra}"
+        extra = f"fund {f_apr:+.1f}%/yr · OI {_oi(float(c.get('openInterest',0))*m)}"
+    return f"- {dot} **{label}** {_price(m)} · {ch:+.1f}% · {extra}"
 
 
 def _movers(uni: list, ctxs: list):
@@ -211,29 +211,30 @@ def main() -> None:
     eth = float(cmap["ETH"]["markPx"]) if "ETH" in cmap else None
 
     fng = _safe(_fng)
-    L = [f"📊 SUPERCLAW MARKET DESK · {ts}"]
+    L = ["## 📊 SUPERCLAW MARKET DESK"]
     if fng:
         te, tl = _tone(fng[0])
-        L.append(f"{te} {tl} · {_fng_face(fng[0])} {fng[1]} ({fng[0]}/100)")
-    L.append("")
+        L.append(f"**{te} {tl} · {_fng_face(fng[0])} {fng[1]} ({fng[0]}/100)**  ·  `{ts}`")
+    else:
+        L.append(f"`{ts}`")
 
-    L.append("ASSETS")
+    L += ["", "**📈 ASSETS**"]
     for a in MAIN_ASSETS:
-        L.append(_card(a, cmap[a]) if a in cmap else f"⚪ {a} (n/a)")
+        L.append(_card(a, cmap[a]) if a in cmap else f"- ⚪ **{a}** (n/a)")
     for label, (dex, coin) in DEX_ASSETS.items():
         d = _safe(_ctxs, dex)
         if d:
             dm = {u.get("name"): c for u, c in zip(d[0], d[1])}
-            L.append(_card(label, dm[coin]) if coin in dm else f"⚪ {label} (n/a)")
+            L.append(_card(label, dm[coin]) if coin in dm else f"- ⚪ **{label}** (n/a)")
 
     sent = []
     if fng:
-        sent.append(f"Fear & Greed   {_bar(fng[0])}  {fng[0]}/100  {fng[1]}")
+        sent.append(f"- Fear & Greed `{_bar(fng[0])}` **{fng[0]}/100** — {fng[1]}")
     alt = _safe(_altseason)
     if alt:
-        sent.append(f"Altcoin Season {_bar(alt[0])}  {int(alt[0])}/100  {alt[1]}")
+        sent.append(f"- Altcoin Season `{_bar(alt[0])}` **{int(alt[0])}/100** — {alt[1]}")
     if sent:
-        L += ["", "🌡️ SENTIMENT"] + sent
+        L += ["", "**🌡️ SENTIMENT**"] + sent
 
     m = _safe(_cmc_metrics)
     if m and m.get("mcap"):
@@ -248,41 +249,46 @@ def main() -> None:
             parts.append(f"ETH.D {float(m['eth_dom']):.1f}%")
         if btc and eth:
             parts.append(f"ETH/BTC {eth/btc:.4f}")
-        L += ["", "🌐 MARKET", " · ".join(parts)]
+        L += ["", "**🌐 MARKET**", " · ".join(parts)]
 
     mv = _safe(_movers, uni, ctxs)
     if mv and (mv[0] or mv[1]):
-        L += ["", "🔥 MOVERS"]
+        L += ["", "**🔥 MOVERS**"]
         if mv[0]:
-            L.append("↑ " + " · ".join(mv[0]))
+            L.append("- ↑ " + " · ".join(mv[0]))
         if mv[1]:
-            L.append("↓ " + " · ".join(mv[1]))
+            L.append("- ↓ " + " · ".join(mv[1]))
 
     st = _safe(_stables)
     if st:
         total, depegs = st
         peg = "⚠️ " + ", ".join(depegs) if depegs else "✅ all ~$1.00"
-        L += ["", "🪙 STABLES", f"Supply ${total/1e9:.0f}B · peg {peg}"]
+        L += ["", "**🪙 STABLES**", f"Supply ${total/1e9:.0f}B · peg {peg}"]
 
     nw = _safe(_news)
     if nw:
-        L += ["", "📰 HEADLINES"] + [f"• {t}" for t in nw]
+        L += ["", "**📰 HEADLINES**"] + [f"- {t}" for t in nw]
 
     dashboard = "\n".join(L)
     instructions = (
         "[AGENT INSTRUCTIONS — do not print this line]\n"
-        "Output the fenced code block above EXACTLY as printed — keep the ``` fences so every "
-        "line break is preserved. Do NOT convert it to markdown, do NOT bold the headers, do NOT "
-        "merge lines into paragraphs. It is a dashboard; reproduce it verbatim.\n"
-        "Then BELOW the code block, as normal text (not inside any code block), add two short sections "
-        "using ONLY the data above:\n"
-        "📈 ANALYTICS — BTC support/resistance (mark clearly as YOUR estimates), trend read "
-        "(accumulation / distribution / ranging / trending), and where we are in the cycle.\n"
-        "⚖️ VERDICT — one paragraph: risk-on or risk-off, what to watch next, conviction (low/med/high).\n"
-        "Flag estimates and anything missing; on-chain whale/flow data is NOT in this build — say so if "
-        "asked, never fabricate. End with: 'What now?  1) Trade memes   2) Trade perps'. Sharp, no filler."
+        "Everything above this line is the dashboard, already written in Markdown. Output it to the user "
+        "AS-IS — render it as Markdown (do NOT wrap it in a code block, do NOT reword, drop, or reorder lines). "
+        "Then, below it, add your analysis using EXACTLY this Markdown structure:\n\n"
+        "### 📈 Analytics  _(my estimates — not advice)_\n"
+        "- **Support:** ~$X — <why>\n"
+        "- **Resistance:** ~$Y — <why>\n"
+        "- **Trend:** <accumulation / distribution / ranging / trending> — <one line>\n"
+        "- **Cycle:** <where we are> — <one line>\n\n"
+        "### ⚖️ Verdict\n"
+        "> <one-paragraph bottom line: risk-on or risk-off, what to watch next>\n\n"
+        "**Conviction:** Low / Medium / High (pick one)\n\n"
+        "### 👉 What now?\n"
+        "**1️⃣ Trade memes**   ·   **2️⃣ Trade perps**\n\n"
+        "Use ONLY the data above; flag estimates; if asked about on-chain whale/flow data say it's not in "
+        "this build, never fabricate. Sharp, no filler."
     )
-    print("```\n" + dashboard + "\n```\n\n" + instructions)
+    print(dashboard + "\n\n" + instructions)
 
 
 if __name__ == "__main__":
