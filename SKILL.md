@@ -37,15 +37,28 @@ This is the single entry point a new user hits. Your job: give them a live read 
 - If the OKX skills aren't installed: `npx skills add okx/onchainos-skills`, then walk the user through wallet setup (login / email OTP) using the `okx-agentic-wallet` skill. Only continue once the wallet is ready.
 
 Then:
-1. **Discover.** Run **Trenches Scout** (install `https://github.com/superpowerdevk/superclaw-trenches-scout` first if it isn't present). Get the **tier-1 token**: symbol, **contract address**, and chain. Never invent a token address — it must come from Scout.
-2. **Present it** to the user with a blunt one-line meme-risk warning (these can rug, go to zero, or become unsellable).
-3. **Ask the buy amount:** "Buy this? How much **USDT**?"
-4. **Ask stop loss (numbered):** "Stop loss at — **1) 5%  2) 10%  3) 15%  4) higher (tell me)**"
-5. **Ask take profit (numbered):** "Take profit at — **1) 5%  2) 10%  3) 15%  4) higher (tell me)**"
-6. **Ask the check interval (numbered):** "How often should I check the price for your SL/TP? **1) 2 min (recommended for memes)  2) 5 min  3) 10 min  4) 15 min  5) 30 min  6) 1 hour  7) 4 hours  8) 12 hours  9) daily.** Memes move fast — pick 1 unless you have a reason not to."
-7. **Buy** via `okx-dex-swap`: resolve the token address → `swap quote` → show the quote (token, USDT in, expected out, price impact, fees) and **get explicit confirmation** → `swap execute`. Respect the swap skill's safety gates: **honeypot → STOP** and tell the user; **price impact > 5% or high tax → warn and require explicit confirmation.**
-8. **Arm SL/TP.** Record the entry price. Set the recurring price check at the chosen interval. On each check, fetch the current price (`okx-dex-swap swap quote`, or GMGN). If price ≤ entry × (1 − SL%) → **sell all** via `swap execute` (stop-loss hit). If price ≥ entry × (1 + TP%) → **sell all** (take-profit hit). After a fill, stop the schedule. Keep the schedule running until SL or TP triggers.
-9. **Summarize:** token, USDT spent, entry price, SL and TP levels, and the check interval — and remind them they can say "sell now" or "cancel" anytime.
+1. **Discover.** Run **Trenches Scout** (install `https://github.com/superpowerdevk/superclaw-trenches-scout` first if it isn't present). Take its signal-ranked candidates with each token's symbol, **contract address**, and chain. Never invent a token address — it must come from Scout.
+2. **Present the picks as a NUMBERED list, top-signal pick first.** Example format:
+   ```
+   Top SuperClaw picks (signal-ranked):
+   1) $WIF — 4 smart wallets, 1 KOL   ← top pick
+   2) $vibecat — strongest smart-money cluster
+   3) $TOKEN — <one-line reason>
+   ```
+   Then the blunt one-line meme-risk warning (can rug, go to zero, or become unsellable; SL/TP is best-effort).
+3. **Lead with the action — offer to buy the #1 pick first (numbered):**
+   "Want me to buy the **#1 pick ($WIF)**?
+   **1) Yes — buy $WIF
+   2) Pick a different one (reply with its number above)
+   3) Not now**"
+   This is the SuperClaw **trader** — it executes. Do NOT stop at "decide for yourself / execute manually on GMGN"; once the user picks a token, continue straight into the buy flow below. If they choose option 2, ask which number; if 3, stop politely.
+4. **Ask the buy amount:** "How much **USDT** do you want to put in?"
+5. **Ask stop loss (numbered):** "Stop loss at — **1) 5%  2) 10%  3) 15%  4) higher (tell me)**"
+6. **Ask take profit (numbered):** "Take profit at — **1) 5%  2) 10%  3) 15%  4) higher (tell me)**"
+7. **Ask the check interval (numbered):** "How often should I check the price for your SL/TP? **1) 2 min (recommended for memes)  2) 5 min  3) 10 min  4) 15 min  5) 30 min  6) 1 hour  7) 4 hours  8) 12 hours  9) daily.** Memes move fast — pick 1 unless you have a reason not to."
+8. **Buy** via `okx-dex-swap`: resolve the token address → `swap quote` → show the quote (token, USDT in, expected out, price impact, fees) and **get explicit confirmation** → `swap execute`. Respect the swap skill's safety gates: **honeypot → STOP** and tell the user; **price impact > 5% or high tax → warn and require explicit confirmation.**
+9. **Arm SL/TP.** Record the entry price. Set the recurring price check at the chosen interval. On each check, fetch the current price (`okx-dex-swap swap quote`, or GMGN). If price ≤ entry × (1 − SL%) → **sell all** via `swap execute` (stop-loss hit). If price ≥ entry × (1 + TP%) → **sell all** (take-profit hit). After a fill, stop the schedule. Keep the schedule running until SL or TP triggers.
+10. **Summarize:** token, USDT spent, entry price, SL and TP levels, and the check interval — and remind them they can say "sell now" or "cancel" anytime.
 
 ## Hard rules
 
