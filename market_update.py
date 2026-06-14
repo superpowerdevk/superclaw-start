@@ -143,8 +143,9 @@ def _asset_line(label: str, spot: float | None, k: dict | None) -> str:
         return f"**{label}:** n/a{soon}"
     if k and k.get("prob_long") is not None and k.get("target"):
         dot, _ = _lean(k)
+        arrow = "↑" if k.get("direction") == "up" else "↓"
         hl, hs = k.get("horizon_long", 24), k.get("horizon_short", 4)
-        return (f"**{label}:** {_price(spot)} · {dot} {int(k['prob_long'])}% → "
+        return (f"**{label}:** {_price(spot)} · {dot} {int(k['prob_long'])}% {arrow} "
                 f"{_price(float(k['target']))} in {hl}h ({int(k['prob_short'])}% in {hs}h){soon}")
     return f"**{label}:** {_price(spot)} · ⚪ forecast n/a{soon}"
 
@@ -153,12 +154,13 @@ def _top_setup(k: dict) -> str | None:
     cand = [(lab, d) for lab, d in k.items() if d and d.get("prob_long") is not None]
     if not cand:
         return None
-    # strongest directional conviction, tie-broken by long-horizon odds
+    # strongest directional conviction, tie-broken by the odds of that move
     cand.sort(key=lambda x: (abs(x[1].get("prob_up_pct", 50) - 50), x[1]["prob_long"]), reverse=True)
     lab, d = cand[0]
     dot, lean = _lean(d)
-    return (f"🎯 **Top setup:** {lab} — {dot} {lean}, {int(d['prob_long'])}% to "
-            f"{_price(float(d['target']))} over {d.get('horizon_long', 24)}h")
+    arrow = "↑" if d.get("direction") == "up" else "↓"
+    return (f"🎯 **Top setup:** {lab} — {dot} {lean}, {int(d['prob_long'])}% to break "
+            f"{_price(float(d['target']))} {arrow} over {d.get('horizon_long', 24)}h")
 
 
 # ---- regime (grounds the verdict, not shown raw) ------------------------
@@ -264,7 +266,7 @@ def cmd_dashboard() -> None:
         return
 
     L = ["## 📊 SUPERCLAW MARKET DESK", f"`{ts}`", "",
-         "**📊 Assets overview** — 🟢 bullish · 🔴 bearish lean · % = odds to break the level"]
+         "**📊 Assets overview** — 🟢 bullish ↑ · 🔴 bearish ↓ · % = odds of that move"]
     for a in ASSET_ORDER:
         L.append("- " + _asset_line(a, spots.get(a), k.get(a)))
     if k:
@@ -338,7 +340,8 @@ def cmd_analytics(label: str) -> None:
         hl, hs = k.get("horizon_long", 24), k.get("horizon_short", 4)
         dot, lean = _lean(k)
         L.append(f"Kronos lean: {dot} **{lean}** ({int(k.get('prob_up_pct', 0))}% close-up over {hl}h)")
-        L.append(f"Odds to {_price(float(k['target']))}: {int(k['prob_short'])}% in {hs}h · "
+        arrow = "↑" if k.get("direction") == "up" else "↓"
+        L.append(f"Odds to break {_price(float(k['target']))} {arrow}: {int(k['prob_short'])}% in {hs}h · "
                  f"{int(k['prob_long'])}% in {hl}h")
         L.append(f"Kronos {hl}h range: ~{_price(float(k['exp_low']))}–{_price(float(k['exp_high']))} "
                  f"· exp close {_price(float(k['exp_close']))}")
