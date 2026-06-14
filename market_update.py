@@ -111,8 +111,28 @@ def _spot_map() -> dict:
     return out
 
 
-def _odds_dot(p: int) -> str:
-    return "🟢" if p >= 45 else "🟡" if p >= 25 else "🔴"
+_SPARK = "▁▂▃▄▅▆▇█"
+
+
+def _sparkline(path) -> str:
+    if not path or len(path) < 2:
+        return ""
+    lo, hi = min(path), max(path)
+    if hi == lo:
+        return _SPARK[3] * len(path)
+    return "".join(_SPARK[min(7, int((v - lo) / (hi - lo) * 7.999))] for v in path)
+
+
+def _lean(k: dict | None):
+    """Directional conviction from prob_up: dot + label."""
+    up = (k or {}).get("prob_up_pct")
+    if up is None:
+        return "⚪", "Neutral"
+    if up >= 60:
+        return "🟢", "Bullish"
+    if up <= 40:
+        return "🔴", "Bearish"
+    return "🟡", "Neutral"
 
 
 def _asset_line(label: str, spot: float | None, k: dict | None) -> str:
@@ -121,12 +141,24 @@ def _asset_line(label: str, spot: float | None, k: dict | None) -> str:
         spot = float(k["spot"])
     if spot is None:
         return f"**{label}:** n/a{soon}"
-    if k and k.get("prob_pct") is not None and k.get("target"):
-        dot = _odds_dot(int(k["prob_pct"]))
-        h = k.get("horizon_hrs", 4)
-        return (f"**{label}:** {_price(spot)} · {dot} {int(k['prob_pct'])}% odds → "
-                f"{_price(float(k['target']))} in {h}h{soon}")
+    if k and k.get("prob_long") is not None and k.get("target"):
+        dot, _ = _lean(k)
+        hl, hs = k.get("horizon_long", 24), k.get("horizon_short", 4)
+        return (f"**{label}:** {_price(spot)} · {dot} {int(k['prob_long'])}% → "
+                f"{_price(float(k['target']))} in {hl}h ({int(k['prob_short'])}% in {hs}h){soon}")
     return f"**{label}:** {_price(spot)} · ⚪ forecast n/a{soon}"
+
+
+def _top_setup(k: dict) -> str | None:
+    cand = [(lab, d) for lab, d in k.items() if d and d.get("prob_long") is not None]
+    if not cand:
+        return None
+    # strongest directional conviction, tie-broken by long-horizon odds
+    cand.sort(key=lambda x: (abs(x[1].get("prob_up_pct", 50) - 50), x[1]["prob_long"]), reverse=True)
+    lab, d = cand[0]
+    dot, lean = _lean(d)
+    return (f"🎯 **Top setup:** {lab} — {dot} {lean}, {int(d['prob_long'])}% to "
+            f"{_price(float(d['target']))} over {d.get('horizon_long', 24)}h")
 
 
 # ---- regime (grounds the verdict, not shown raw) ------------------------
@@ -232,10 +264,14 @@ def cmd_dashboard() -> None:
         return
 
     L = ["## 📊 SUPERCLAW MARKET DESK", f"`{ts}`", "",
-         "**📊 Assets overview** — odds of breaking the next level"]
+         "**📊 Assets overview** — 🟢 bullish · 🔴 bearish lean · % = odds to break the level"]
     for a in ASSET_ORDER:
         L.append("- " + _asset_line(a, spots.get(a), k.get(a)))
-    if not k:
+    if k:
+        ts_line = _top_setup(k)
+        if ts_line:
+            L += ["", ts_line]
+    else:
         L += ["", "_⚠️ Kronos forecast offline — showing prices only._"]
     dashboard = "\n".join(L)
 
@@ -299,29 +335,40 @@ def cmd_analytics(label: str) -> None:
     if spot is not None:
         L.append(f"Spot: {_price(spot)}")
     if k and k.get("exp_close"):
-        h = k.get("horizon_hrs", 4)
-        L.append(f"Kronos {h}h forecast: range ~{_price(float(k['exp_low']))}–{_price(float(k['exp_high']))} "
+        hl, hs = k.get("horizon_long", 24), k.get("horizon_short", 4)
+        dot, lean = _lean(k)
+        L.append(f"Kronos lean: {dot} **{lean}** ({int(k.get('prob_up_pct', 0))}% close-up over {hl}h)")
+        L.append(f"Odds to {_price(float(k['target']))}: {int(k['prob_short'])}% in {hs}h · "
+                 f"{int(k['prob_long'])}% in {hl}h")
+        L.append(f"Kronos {hl}h range: ~{_price(float(k['exp_low']))}–{_price(float(k['exp_high']))} "
                  f"· exp close {_price(float(k['exp_close']))}")
-        if k.get("prob_pct") is not None and k.get("target"):
-            L.append(f"Odds: {int(k['prob_pct'])}% to {_price(float(k['target']))} · "
-                     f"{int(k.get('prob_up_pct', 0))}% close-up over {h}h")
+        spark = _sparkline(k.get("path"))
+        if spark:
+            L.append(f"Forecast path ({hl}h): {spark}")
+        if k.get("suggested_stop") and k.get("suggested_tp"):
+            L.append(f"🎯 Kronos levels → stop ~{_price(float(k['suggested_stop']))} · "
+                     f"target ~{_price(float(k['suggested_tp']))}")
     else:
         L.append("Kronos forecast: n/a (sidecar offline or asset unsupported)")
     if rng:
         L.append(f"Recent 24h range: {_price(rng[1])}–{_price(rng[0])}")
 
     perps = "coming soon" if label in NO_PERPS else "available"
+    sltp = ""
+    if k and k.get("suggested_stop") and k.get("suggested_tp"):
+        sltp = (f" If they say yes, carry the Kronos levels into the handoff: "
+                f"stop ~{_price(float(k['suggested_stop']))}, target ~{_price(float(k['suggested_tp']))}.")
     L.append(
         "\n[AGENT INSTRUCTIONS — do not print this line]\n"
         "Print everything above this line as-is, then write EXACTLY:\n\n"
         f"### 📈 {label} Analytics  _(my estimates — not advice)_\n"
-        "- **Support:** ~$X — <why; tie to the recent 24h low and the Kronos forecast low>\n"
+        "- **Support:** ~$X — <why; tie to the recent 24h low and the Kronos forecast low/stop>\n"
         "- **Resistance:** ~$Y — <why; tie to the next round target and the Kronos forecast high>\n"
-        "- **Trend:** <ranging / trending up / trending down, with lean> — <one line; use the odds + "
-        "close-up % above>\n"
+        "- **Trend:** <ranging / trending up / trending down, with lean> — <one line; use the Kronos "
+        "lean + the dual-horizon odds above>\n"
         "- **Cycle:** <where this asset sits> — <one line>\n\n"
         f"Then offer (perps for {label} are {perps}):\n"
-        f"\"Want to copy-trade {label} perps? **1) Yes  2) Back to market**\"\n"
+        f"\"Want to copy-trade {label} perps? **1) Yes  2) Back to market**\"{sltp}\n"
         "Use ONLY the numbers above; flag them as estimates; never fabricate. If a value is n/a, say so."
     )
     print("\n".join(L))
