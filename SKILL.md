@@ -19,12 +19,12 @@ This is the single entry point a new user hits. Your job: give them a live read 
 1. **Run the desk snapshot:** `python3 market_update.py` (in this skill's directory). It prints, keyless:
    - a fenced **Assets overview** card — for each asset: live price + Kronos odds of breaking the next round level within the horizon (e.g. `BTC: $64,323 · 🟢 70% odds → $65,000 in 4h`),
    - raw headlines + a market-context line, plus the exact format to render the rest.
-2. **Show the dashboard, then build the rest.** Print everything above the `[AGENT INSTRUCTIONS]` line **AS-IS, including the ``` code fences** around the assets (the fences stop the lines collapsing — never strip them). Then follow the embedded instructions to add **### 📰 Headlines** (tag each 🟢 bullish / 🔴 bearish / ⚪ neutral), **### ⚖️ Verdict** (a bold Risk-on/off/Mixed lead + one-paragraph read grounded in the odds and the hidden market-context line + a Conviction badge), and **### 👉 What now?**. Never invent or alter a number from the card.
-3. **Offer the fork (numbered):** "What now? **1) More analytics** (pick an asset)  **2) Copy-trade perps**"
+2. **Show the dashboard, then build the rest.** Print everything above the `[AGENT INSTRUCTIONS]` line **AS-IS as a Markdown list** — each asset on its own line (don't merge them into a paragraph, don't wrap in a code block). Then follow the embedded instructions to add **### 📰 Headlines** (tag each 🟢 bullish / 🔴 bearish / ⚪ neutral, and ALWAYS keep the color key in the header so users know what the dots mean), **### ⚖️ Verdict** (a bold Risk-on/off/Mixed lead + one-paragraph read grounded in the odds and the hidden market-context line + a Conviction badge), and **### 👉 What now?**. Never invent or alter a number from the card.
+3. **Offer the fork (numbered, single step):** "📈 Deeper read on an asset: **1) BTC  2) ETH  3) BNB  4) HYPE  5) SOL  6) GOLD** · 📊 **7) Copy-trade perps**". A reply of 1–6 IS the chosen asset — go straight to its analytics; 7 starts perps.
 
-## Branch A — MORE ANALYTICS
+## Branch A — MORE ANALYTICS (one asset)
 
-1. If the user picks analytics, ask which asset (numbered): **1) BTC  2) ETH  3) BNB  4) HYPE  5) SOL  6) GOLD**.
+1. The number the user pressed in the What-now menu (1–6) **is** the asset — do NOT show the asset list again or ask which one. Map: 1=BTC 2=ETH 3=BNB 4=HYPE 5=SOL 6=GOLD.
 2. Run `python3 market_update.py analytics <ASSET>`. It prints that asset's spot, the Kronos forecast range + odds + close-up probability, and the recent 24h range, followed by the exact Analytics format.
 3. Render **### 📈 <ASSET> Analytics _(my estimates — not advice)_** with Support / Resistance / Trend / Cycle, grounded ONLY in the numbers the script printed — flag them as estimates, never fabricate.
 4. Then offer to roll into perps for that asset: "Want to copy-trade <ASSET> perps? **1) Yes  2) Back to market**" (if SOL, note its perps are coming soon).

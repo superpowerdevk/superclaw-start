@@ -25,7 +25,7 @@ from datetime import datetime, timezone
 HL = "https://api.hyperliquid.xyz/info"
 CMC = "https://pro-api.coinmarketcap.com/trial-pro-api"
 LLAMA = "https://stablecoins.llama.fi/stablecoins?includePrices=true"
-KRONOS_URL = os.environ.get("KRONOS_URL", "").rstrip("/")
+KRONOS_URL = os.environ.get("KRONOS_URL", "https://superclaw-kronos-sidecar.onrender.com").rstrip("/")
 
 # Display order = analytics menu order: 1)BTC 2)ETH 3)BNB 4)HYPE 5)SOL 6)GOLD
 ASSET_ORDER = ["BTC", "ETH", "BNB", "HYPE", "SOL", "GOLD"]
@@ -75,14 +75,20 @@ def _safe(fn, *a):
 
 # ---- Kronos forecasts ---------------------------------------------------
 def _kronos() -> dict:
-    """Fetch cached per-asset forecasts from the sidecar. {} if unavailable."""
+    """Fetch cached per-asset forecasts from the sidecar. {} if unavailable.
+    Retries once in case the service is briefly slow or just-redeployed."""
     if not KRONOS_URL:
         return {}
-    try:
-        data = json.loads(_get(KRONOS_URL + "/forecast", timeout=8).decode())
-        return {a["asset"]: a for a in data.get("assets", []) if a.get("asset")}
-    except Exception:
-        return {}
+    for _ in range(2):
+        try:
+            data = json.loads(_get(KRONOS_URL + "/forecast", timeout=12).decode())
+            assets = {a["asset"]: a for a in data.get("assets", []) if a.get("asset")}
+            if assets:
+                return assets
+        except Exception:
+            pass
+        time.sleep(1.5)
+    return {}
 
 
 def _spot_map() -> dict:
@@ -114,13 +120,13 @@ def _asset_line(label: str, spot: float | None, k: dict | None) -> str:
     if spot is None and k and k.get("spot"):
         spot = float(k["spot"])
     if spot is None:
-        return f"{label}: n/a{soon}"
+        return f"**{label}:** n/a{soon}"
     if k and k.get("prob_pct") is not None and k.get("target"):
         dot = _odds_dot(int(k["prob_pct"]))
         h = k.get("horizon_hrs", 4)
-        return (f"{label}: {_price(spot)} · {dot} {int(k['prob_pct'])}% odds → "
+        return (f"**{label}:** {_price(spot)} · {dot} {int(k['prob_pct'])}% odds → "
                 f"{_price(float(k['target']))} in {h}h{soon}")
-    return f"{label}: {_price(spot)} · ⚪ forecast n/a{soon}"
+    return f"**{label}:** {_price(spot)} · ⚪ forecast n/a{soon}"
 
 
 # ---- regime (grounds the verdict, not shown raw) ------------------------
@@ -226,12 +232,11 @@ def cmd_dashboard() -> None:
         return
 
     L = ["## 📊 SUPERCLAW MARKET DESK", f"`{ts}`", "",
-         "**📊 Assets overview** — odds of breaking the next level", "```"]
+         "**📊 Assets overview** — odds of breaking the next level"]
     for a in ASSET_ORDER:
-        L.append(_asset_line(a, spots.get(a), k.get(a)))
-    L.append("```")
+        L.append("- " + _asset_line(a, spots.get(a), k.get(a)))
     if not k:
-        L.append("_⚠️ Kronos forecast offline — showing prices only._")
+        L += ["", "_⚠️ Kronos forecast offline — showing prices only._"]
     dashboard = "\n".join(L)
 
     headlines = _safe(_news) or []
@@ -240,26 +245,28 @@ def cmd_dashboard() -> None:
 
     instructions = (
         "\n\n[AGENT INSTRUCTIONS — do not print this line]\n"
-        "Everything ABOVE this line is the dashboard. Print it AS-IS, INCLUDING the ``` code fences "
-        "around the assets (the fences keep the lines from collapsing — do NOT remove them, do not "
+        "Everything ABOVE this line is the dashboard. Print it AS-IS as a Markdown list — keep each asset "
+        "on its OWN line (do not merge them into a paragraph, do not wrap in a code block, do not "
         "reword/reorder). The asset lines and their odds are final — never invent or change a number.\n\n"
         "Then build the rest yourself:\n\n"
         "RAW HEADLINES (tag each by likely market impact — 🟢 bullish / 🔴 bearish / ⚪ neutral):\n"
         f"{hl_block}\n\n"
         f"MARKET CONTEXT (use to ground the verdict — do NOT print this line raw): {regime}\n\n"
         "Render EXACTLY this structure below the dashboard:\n\n"
-        "### 📰 Headlines\n"
-        "- <🟢/🔴/⚪> <headline>   (one per headline above)\n\n"
+        "### 📰 Headlines  ·  🟢 bullish · 🔴 bearish · ⚪ neutral\n"
+        "- 🟢/🔴/⚪ <headline>   (one per headline above — ALWAYS keep that color key in the header so "
+        "users know what the dots mean)\n\n"
         "### ⚖️ Verdict\n"
         "**<Risk-on / Risk-off / Mixed>.** <one-paragraph read of the overall market, grounded in the "
         "odds above + the market context. Plain text, descriptive, no buy/sell calls.>\n"
         "**Conviction:** 🟢 High / 🟡 Medium / 🔴 Low (pick one)\n\n"
         "### 👉 What now?\n"
-        "**1️⃣ More analytics** — pick an asset: 1) BTC  2) ETH  3) BNB  4) HYPE  5) SOL  6) GOLD\n"
-        "**2️⃣ Copy-trade perps**\n\n"
-        "If the user picks an asset for analytics, run `python3 market_update.py analytics <ASSET>` and "
-        "follow its instructions. Descriptive only, never advice; never fabricate data; if a number isn't "
-        "above, say it's unavailable."
+        "📈 Deeper read on an asset: **1) BTC  2) ETH  3) BNB  4) HYPE  5) SOL  6) GOLD**\n"
+        "📊 **7) Copy-trade perps**\n\n"
+        "If the user replies 1–6, that number IS the asset — immediately run "
+        "`python3 market_update.py analytics <ASSET>` and follow its instructions. Do NOT re-ask which "
+        "asset. If they reply 7, start the perps flow. Descriptive only, never advice; never fabricate "
+        "data; if a number isn't above, say it's unavailable."
     )
     print(dashboard + instructions)
 
