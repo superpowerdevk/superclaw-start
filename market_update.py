@@ -1,18 +1,23 @@
 #!/usr/bin/env python3
-"""SuperClaw market desk — keyless data, rendered as a compact mobile dashboard.
+"""SuperClaw market desk — keyless data + Kronos forecasts, compact mobile dashboard.
 
-The script prints a ready-made dashboard (emoji status, gauge bars, compact
-cards). The agent shows that verbatim, then appends Analytics + Verdict.
+ASSETS OVERVIEW lines carry a Kronos-derived probability ("X% odds going up to the
+next round level in next Nh"), served by the Kronos sidecar at $KRONOS_URL. All other
+data is keyless: Hyperliquid (spot), CoinMarketCap trial-pro-api (regime), DefiLlama
+(stables), RSS (headlines). The agent tags headlines, writes the verdict from the
+hidden context block, and renders the perps-only menu.
 
-Sources (all keyless): Hyperliquid (price/funding/OI + movers),
-CoinMarketCap trial-pro-api (mcap/vol/dominance/Fear&Greed/Altcoin Season),
-DefiLlama (stablecoins), CoinDesk RSS (headlines).
-On-chain whale/exchange-flow is intentionally omitted (no keyless source).
+Usage:
+    python3 market_update.py                 # the dashboard
+    python3 market_update.py analytics BTC   # one asset's Kronos read (for per-asset analytics)
 """
 
 from __future__ import annotations
 
 import json
+import os
+import sys
+import time
 import urllib.request
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
@@ -20,11 +25,12 @@ from datetime import datetime, timezone
 HL = "https://api.hyperliquid.xyz/info"
 CMC = "https://pro-api.coinmarketcap.com/trial-pro-api"
 LLAMA = "https://stablecoins.llama.fi/stablecoins?includePrices=true"
+KRONOS_URL = os.environ.get("KRONOS_URL", "").rstrip("/")
 
-MAIN_ASSETS = ["BTC", "ETH", "SOL", "BNB", "HYPE"]
+# Display order = analytics menu order: 1)BTC 2)ETH 3)BNB 4)HYPE 5)SOL 6)GOLD
+ASSET_ORDER = ["BTC", "ETH", "BNB", "HYPE", "SOL", "GOLD"]
 DEX_ASSETS = {"GOLD": ("xyz", "xyz:GOLD")}
 NO_PERPS = {"SOL"}
-MOVER_MIN_VOL = 10_000_000
 
 
 def _post(body: dict) -> list:
@@ -34,9 +40,9 @@ def _post(body: dict) -> list:
         return json.loads(r.read().decode())
 
 
-def _get(url: str):
+def _get(url: str, timeout: int = 15):
     req = urllib.request.Request(url, headers={"Accept": "application/json", "User-Agent": "superclaw"})
-    with urllib.request.urlopen(req, timeout=15) as r:
+    with urllib.request.urlopen(req, timeout=timeout) as r:
         return r.read()
 
 
@@ -60,57 +66,64 @@ def _price(p: float) -> str:
     return f"${p:.4f}"
 
 
-def _chg(c: dict) -> float:
-    m = float(c["markPx"]); pv = float(c["prevDayPx"])
-    return (m - pv) / pv * 100 if pv else 0.0
+def _safe(fn, *a):
+    try:
+        return fn(*a)
+    except Exception:
+        return None
 
 
-def _bar(v: float, width: int = 10) -> str:
-    f = max(0, min(width, round(v / 100 * width)))
-    return "▓" * f + "░" * (width - f)
+# ---- Kronos forecasts ---------------------------------------------------
+def _kronos() -> dict:
+    """Fetch cached per-asset forecasts from the sidecar. {} if unavailable."""
+    if not KRONOS_URL:
+        return {}
+    try:
+        data = json.loads(_get(KRONOS_URL + "/forecast", timeout=8).decode())
+        return {a["asset"]: a for a in data.get("assets", []) if a.get("asset")}
+    except Exception:
+        return {}
 
 
-def _oi(usd: float) -> str:
-    return f"${usd/1e9:.1f}B" if usd >= 1e9 else f"${usd/1e6:.0f}M"
+def _spot_map() -> dict:
+    """Live spot per asset from Hyperliquid (main book + xyz dex for GOLD)."""
+    out = {}
+    try:
+        uni, ctxs = _ctxs()
+        cmap = {u.get("name"): c for u, c in zip(uni, ctxs)}
+        for a in ASSET_ORDER:
+            if a in cmap:
+                out[a] = float(cmap[a]["markPx"])
+    except Exception:
+        pass
+    for label, (dex, coin) in DEX_ASSETS.items():
+        d = _safe(_ctxs, dex)
+        if d:
+            dm = {u.get("name"): c for u, c in zip(d[0], d[1])}
+            if coin in dm:
+                out[label] = float(dm[coin]["markPx"])
+    return out
 
 
-def _card(label: str, c: dict) -> str:
-    m = float(c["markPx"]); ch = _chg(c)
-    dot = "🟢" if ch >= 0 else "🔴"
-    if label in NO_PERPS:
-        extra = "_perps soon_"
-    else:
-        f_apr = float(c.get("funding", 0)) * 24 * 365 * 100
-        extra = f"fund {f_apr:+.1f}%/yr · OI {_oi(float(c.get('openInterest',0))*m)}"
-    return f"- {dot} **{label}** {_price(m)} · {ch:+.1f}% · {extra}"
+def _odds_dot(p: int) -> str:
+    return "🟢" if p >= 45 else "🟡" if p >= 25 else "🔴"
 
 
-def _movers(uni: list, ctxs: list):
-    rows = []
-    for u, c in zip(uni, ctxs):
-        try:
-            if float(c.get("dayNtlVlm", 0)) < MOVER_MIN_VOL:
-                continue
-            rows.append((u.get("name"), _chg(c)))
-        except Exception:
-            continue
-    rows.sort(key=lambda x: x[1], reverse=True)
-    up = [f"{n} {p:+.0f}%" for n, p in rows[:3] if p > 0]
-    dn = [f"{n} {p:+.0f}%" for n, p in rows[-3:][::-1] if p < 0]
-    return up, dn
+def _asset_line(label: str, spot: float | None, k: dict | None) -> str:
+    soon = "  (perps soon)" if label in NO_PERPS else ""
+    if spot is None and k and k.get("spot"):
+        spot = float(k["spot"])
+    if spot is None:
+        return f"{label}: n/a{soon}"
+    if k and k.get("prob_pct") is not None and k.get("target"):
+        dot = _odds_dot(int(k["prob_pct"]))
+        h = k.get("horizon_hrs", 4)
+        return (f"{label}: {_price(spot)} · {dot} {int(k['prob_pct'])}% odds → "
+                f"{_price(float(k['target']))} in {h}h{soon}")
+    return f"{label}: {_price(spot)} · ⚪ forecast n/a{soon}"
 
 
-def _cmc_metrics() -> dict:
-    d = _cmc("/v1/global-metrics/quotes/latest").get("data", {})
-    q = (d.get("quote", {}) or {}).get("USD", {}) or {}
-    return {
-        "mcap": d.get("total_market_cap") or q.get("total_market_cap"),
-        "mcap_chg": q.get("total_market_cap_yesterday_percentage_change"),
-        "vol": d.get("total_volume_24h") or q.get("total_volume_24h"),
-        "btc_dom": d.get("btc_dominance"), "eth_dom": d.get("eth_dominance"),
-    }
-
-
+# ---- regime (grounds the verdict, not shown raw) ------------------------
 def _fng():
     d = _cmc("/v3/fear-and-greed/latest").get("data", {})
     return (int(d["value"]), d.get("value_classification", "")) if d.get("value") is not None else None
@@ -126,14 +139,18 @@ def _altseason():
     return (v, regime)
 
 
+def _cmc_metrics() -> dict:
+    d = _cmc("/v1/global-metrics/quotes/latest").get("data", {})
+    q = (d.get("quote", {}) or {}).get("USD", {}) or {}
+    return {"mcap_chg": q.get("total_market_cap_yesterday_percentage_change"),
+            "btc_dom": d.get("btc_dominance")}
+
+
 USD_MAJORS = {"USDT", "USDC", "DAI", "USDE", "FDUSD", "PYUSD", "TUSD",
               "USDD", "FRAX", "GUSD", "USDP", "USDS", "LUSD"}
 
 
 def _stables():
-    """USD-pegged stablecoin supply + de-peg flags for MAJOR $1 stables only.
-    Excludes yield-bearing / treasury tokens (USYC, USDY, etc.) that float above $1
-    by design and would otherwise show as false de-pegs."""
     data = json.loads(_get(LLAMA).decode())
     total = 0.0; depegs = []
     for a in data.get("peggedAssets", []):
@@ -156,10 +173,10 @@ NEWS_FEEDS = [
 
 
 def _local(tag: str) -> str:
-    return tag.split("}")[-1]  # strip XML namespace
+    return tag.split("}")[-1]
 
 
-def _news(limit: int = 4):
+def _news(limit: int = 5):
     for url in NEWS_FEEDS:
         try:
             root = ET.fromstring(_get(url))
@@ -167,7 +184,7 @@ def _news(limit: int = 4):
             continue
         titles = []
         for el in root.iter():
-            if _local(el.tag) in ("item", "entry"):  # RSS item or Atom entry
+            if _local(el.tag) in ("item", "entry"):
                 for ch in el:
                     if _local(ch.tag) == "title" and (ch.text or "").strip():
                         titles.append(ch.text.strip())
@@ -178,117 +195,137 @@ def _news(limit: int = 4):
     return []
 
 
-def _tone(fng_val: int):
-    if fng_val < 25:
-        return "🔴", "Risk-off"
-    if fng_val < 50:
-        return "🟠", "Cautious"
-    if fng_val < 65:
-        return "🟡", "Mixed"
-    return "🟢", "Risk-on"
-
-
-def _fng_face(v: int) -> str:
-    return "😱" if v < 25 else "😟" if v < 45 else "😐" if v < 55 else "🙂" if v < 75 else "🤑"
-
-
-def _safe(fn, *a):
-    try:
-        return fn(*a)
-    except Exception:
-        return None
-
-
-def main() -> None:
-    ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    try:
-        uni, ctxs = _ctxs()
-        cmap = {u.get("name"): c for u, c in zip(uni, ctxs)}
-    except Exception as e:  # noqa: BLE001
-        print(f"ERROR: Hyperliquid fetch failed: {e}")
-        return
-    btc = float(cmap["BTC"]["markPx"]) if "BTC" in cmap else None
-    eth = float(cmap["ETH"]["markPx"]) if "ETH" in cmap else None
-
+def _regime_context() -> str:
+    bits = []
     fng = _safe(_fng)
-    L = ["## 📊 SUPERCLAW MARKET DESK"]
     if fng:
-        te, tl = _tone(fng[0])
-        L.append(f"**{te} {tl} · {_fng_face(fng[0])} {fng[1]} ({fng[0]}/100)**  ·  `{ts}`")
-    else:
-        L.append(f"`{ts}`")
-
-    L += ["", "**📈 ASSETS**"]
-    for a in MAIN_ASSETS:
-        L.append(_card(a, cmap[a]) if a in cmap else f"- ⚪ **{a}** (n/a)")
-    for label, (dex, coin) in DEX_ASSETS.items():
-        d = _safe(_ctxs, dex)
-        if d:
-            dm = {u.get("name"): c for u, c in zip(d[0], d[1])}
-            L.append(_card(label, dm[coin]) if coin in dm else f"- ⚪ **{label}** (n/a)")
-
-    sent = []
-    if fng:
-        sent.append(f"- Fear & Greed `{_bar(fng[0])}` **{fng[0]}/100** — {fng[1]}")
+        bits.append(f"Fear&Greed {fng[0]}/100 ({fng[1]})")
     alt = _safe(_altseason)
     if alt:
-        sent.append(f"- Altcoin Season `{_bar(alt[0])}` **{int(alt[0])}/100** — {alt[1]}")
-    if sent:
-        L += ["", "**🌡️ SENTIMENT**"] + sent
-
+        bits.append(f"Altseason {int(alt[0])}/100 ({alt[1]})")
     m = _safe(_cmc_metrics)
-    if m and m.get("mcap"):
-        parts = [f"Mkt cap ${float(m['mcap'])/1e12:.2f}T"]
+    if m:
         if m.get("mcap_chg") is not None:
-            parts[0] += f" ({float(m['mcap_chg']):+.1f}%)"
-        if m.get("vol"):
-            parts.append(f"Vol ${float(m['vol'])/1e9:.0f}B")
+            bits.append(f"Mkt cap 24h {float(m['mcap_chg']):+.1f}%")
         if m.get("btc_dom") is not None:
-            parts.append(f"BTC.D {float(m['btc_dom']):.1f}%")
-        if m.get("eth_dom") is not None:
-            parts.append(f"ETH.D {float(m['eth_dom']):.1f}%")
-        if btc and eth:
-            parts.append(f"ETH/BTC {eth/btc:.4f}")
-        L += ["", "**🌐 MARKET**", " · ".join(parts)]
-
-    mv = _safe(_movers, uni, ctxs)
-    if mv and (mv[0] or mv[1]):
-        L += ["", "**🔥 MOVERS**"]
-        if mv[0]:
-            L.append("- ↑ " + " · ".join(mv[0]))
-        if mv[1]:
-            L.append("- ↓ " + " · ".join(mv[1]))
-
+            bits.append(f"BTC.D {float(m['btc_dom']):.1f}%")
     st = _safe(_stables)
     if st:
         total, depegs = st
-        peg = "⚠️ " + ", ".join(depegs) if depegs else "✅ all ~$1.00"
-        L += ["", "**🪙 STABLES**", f"Supply ${total/1e9:.0f}B · peg {peg}"]
+        bits.append(f"Stables ${total/1e9:.0f}B " + ("⚠️ " + ", ".join(depegs) if depegs else "peg ok"))
+    return " · ".join(bits) if bits else "regime data unavailable"
 
-    nw = _safe(_news)
-    if nw:
-        L += ["", "**📰 HEADLINES**"] + [f"- {t}" for t in nw]
 
+# ---- dashboard ----------------------------------------------------------
+def cmd_dashboard() -> None:
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    spots = _spot_map()
+    k = _kronos()
+    if not spots and not k:
+        print("ERROR: market data unavailable (Hyperliquid + Kronos both unreachable).")
+        return
+
+    L = ["## 📊 SUPERCLAW MARKET DESK", f"`{ts}`", "",
+         "**📊 Assets overview** — odds of breaking the next level", "```"]
+    for a in ASSET_ORDER:
+        L.append(_asset_line(a, spots.get(a), k.get(a)))
+    L.append("```")
+    if not k:
+        L.append("_⚠️ Kronos forecast offline — showing prices only._")
     dashboard = "\n".join(L)
+
+    headlines = _safe(_news) or []
+    regime = _regime_context()
+    hl_block = "\n".join(f"- {h}" for h in headlines) if headlines else "- (no headlines fetched)"
+
     instructions = (
-        "[AGENT INSTRUCTIONS — do not print this line]\n"
-        "Everything above this line is the dashboard, already written in Markdown. Output it to the user "
-        "AS-IS — render it as Markdown (do NOT wrap it in a code block, do NOT reword, drop, or reorder lines). "
-        "Then, below it, add your analysis using EXACTLY this Markdown structure:\n\n"
-        "### 📈 Analytics  _(my estimates — not advice)_\n"
-        "- **Support:** ~$X — <why>\n"
-        "- **Resistance:** ~$Y — <why>\n"
-        "- **Trend:** <accumulation / distribution / ranging / trending> — <one line>\n"
-        "- **Cycle:** <where we are> — <one line>\n\n"
+        "\n\n[AGENT INSTRUCTIONS — do not print this line]\n"
+        "Everything ABOVE this line is the dashboard. Print it AS-IS, INCLUDING the ``` code fences "
+        "around the assets (the fences keep the lines from collapsing — do NOT remove them, do not "
+        "reword/reorder). The asset lines and their odds are final — never invent or change a number.\n\n"
+        "Then build the rest yourself:\n\n"
+        "RAW HEADLINES (tag each by likely market impact — 🟢 bullish / 🔴 bearish / ⚪ neutral):\n"
+        f"{hl_block}\n\n"
+        f"MARKET CONTEXT (use to ground the verdict — do NOT print this line raw): {regime}\n\n"
+        "Render EXACTLY this structure below the dashboard:\n\n"
+        "### 📰 Headlines\n"
+        "- <🟢/🔴/⚪> <headline>   (one per headline above)\n\n"
         "### ⚖️ Verdict\n"
-        "**<Risk-on / Risk-off>.** <one-paragraph bottom line, plain text: what it means + what to watch next>\n\n"
-        "**Conviction:** 🟢 High / 🟡 Medium / 🔴 Low (pick one, keep its dot)\n\n"
+        "**<Risk-on / Risk-off / Mixed>.** <one-paragraph read of the overall market, grounded in the "
+        "odds above + the market context. Plain text, descriptive, no buy/sell calls.>\n"
+        "**Conviction:** 🟢 High / 🟡 Medium / 🔴 Low (pick one)\n\n"
         "### 👉 What now?\n"
-        "**1️⃣ Trade memes**   ·   **2️⃣ Trade perps**\n\n"
-        "Use ONLY the data above; flag estimates; if asked about on-chain whale/flow data say it's not in "
-        "this build, never fabricate. Sharp, no filler."
+        "**1️⃣ More analytics** — pick an asset: 1) BTC  2) ETH  3) BNB  4) HYPE  5) SOL  6) GOLD\n"
+        "**2️⃣ Copy-trade perps**\n\n"
+        "If the user picks an asset for analytics, run `python3 market_update.py analytics <ASSET>` and "
+        "follow its instructions. Descriptive only, never advice; never fabricate data; if a number isn't "
+        "above, say it's unavailable."
     )
-    print(dashboard + "\n\n" + instructions)
+    print(dashboard + instructions)
+
+
+# ---- per-asset analytics ------------------------------------------------
+def _range_24h(label: str):
+    dex = DEX_ASSETS.get(label, (None, label))[0]
+    coin = DEX_ASSETS.get(label, (None, label))[1]
+    end = int(time.time() * 1000); start = end - 26 * 3600_000
+    body = {"type": "candleSnapshot", "req": {"coin": coin, "interval": "1h",
+                                              "startTime": start, "endTime": end}}
+    if dex:
+        body["req"]["dex"] = dex
+    rows = _post(body)
+    highs = [float(c["h"]) for c in rows]; lows = [float(c["l"]) for c in rows]
+    return (max(highs), min(lows)) if highs else None
+
+
+def cmd_analytics(label: str) -> None:
+    label = (label or "").upper()
+    if label not in ASSET_ORDER:
+        print(f"Unknown asset '{label}'. Choose: {', '.join(ASSET_ORDER)}.")
+        return
+    spots = _spot_map()
+    spot = spots.get(label)
+    k = _kronos().get(label)
+    rng = _safe(_range_24h, label)
+
+    L = [f"## 📈 {label} — SuperClaw read  _(my estimates — not advice)_"]
+    if spot is not None:
+        L.append(f"Spot: {_price(spot)}")
+    if k and k.get("exp_close"):
+        h = k.get("horizon_hrs", 4)
+        L.append(f"Kronos {h}h forecast: range ~{_price(float(k['exp_low']))}–{_price(float(k['exp_high']))} "
+                 f"· exp close {_price(float(k['exp_close']))}")
+        if k.get("prob_pct") is not None and k.get("target"):
+            L.append(f"Odds: {int(k['prob_pct'])}% to {_price(float(k['target']))} · "
+                     f"{int(k.get('prob_up_pct', 0))}% close-up over {h}h")
+    else:
+        L.append("Kronos forecast: n/a (sidecar offline or asset unsupported)")
+    if rng:
+        L.append(f"Recent 24h range: {_price(rng[1])}–{_price(rng[0])}")
+
+    perps = "coming soon" if label in NO_PERPS else "available"
+    L.append(
+        "\n[AGENT INSTRUCTIONS — do not print this line]\n"
+        "Print everything above this line as-is, then write EXACTLY:\n\n"
+        f"### 📈 {label} Analytics  _(my estimates — not advice)_\n"
+        "- **Support:** ~$X — <why; tie to the recent 24h low and the Kronos forecast low>\n"
+        "- **Resistance:** ~$Y — <why; tie to the next round target and the Kronos forecast high>\n"
+        "- **Trend:** <ranging / trending up / trending down, with lean> — <one line; use the odds + "
+        "close-up % above>\n"
+        "- **Cycle:** <where this asset sits> — <one line>\n\n"
+        f"Then offer (perps for {label} are {perps}):\n"
+        f"\"Want to copy-trade {label} perps? **1) Yes  2) Back to market**\"\n"
+        "Use ONLY the numbers above; flag them as estimates; never fabricate. If a value is n/a, say so."
+    )
+    print("\n".join(L))
+
+
+def main() -> None:
+    argv = sys.argv[1:]
+    if argv and argv[0] in ("analytics", "a"):
+        cmd_analytics(argv[1] if len(argv) > 1 else "")
+    else:
+        cmd_dashboard()
 
 
 if __name__ == "__main__":

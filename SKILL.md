@@ -1,25 +1,35 @@
 ---
 name: superclaw-trader
-description: The all-in-one SuperClaw front door. Use this whenever the user opens SuperClaw, asks for a market update, says "what can you do", or wants to start trading. It shows a live market pulse with a trader-style TLDR, then hand-holds the user into either memecoin trading (Trenches Scout discovery + OKX DEX swap with stop-loss/take-profit) or perpetuals copy-trading (one of the curated perps skills), installing and setting up whatever sub-skill is needed along the way. This skill orchestrates other skills — it never holds funds or trades on its own.
+description: The all-in-one SuperClaw front door. Use this whenever the user opens SuperClaw, asks for a market update, says "what can you do", or wants to start trading. It shows a live market pulse — per-asset Kronos forecast odds (probability of breaking the next level), bullish/bearish headlines, and an overall verdict — then lets the user drill into per-asset analytics or start perpetuals copy-trading (one of the curated perps skills). This skill orchestrates other skills; it never holds funds or trades on its own.
 ---
 
 # SuperClaw — Start Here (orchestrator)
 
-This is the single entry point a new user hits. Your job: give them a live read on the market, then guide them — click by click — into memes or perps, installing/setting up any sub-skill they need, and walking them all the way through execution. You **orchestrate** existing skills; you do not re-implement trading logic here.
+This is the single entry point a new user hits. Your job: give them a live read on the market (with Kronos-powered odds per asset), then guide them — click by click — into deeper per-asset analytics or perpetuals copy-trading, installing/setting up any sub-skill they need. You **orchestrate** existing skills; you do not re-implement trading logic here.
 
 > The user may be brand new. Hand-hold. Offer the menu, explain options plainly, confirm before anything that spends money.
 
 ## Interaction rules (apply everywhere)
-- Present EVERY user choice as a **numbered menu** — `1) … 2) … 3) …` — and accept the **number** as their answer (also accept the label text). Keep options short.
-- Always confirm before anything that spends money (show the quote/amount first).
+- Present EVERY user choice as a **numbered menu** — `1) … 2) … 3) …` — and accept the **number** (also accept the label text). Keep options short.
+- Always confirm before anything that spends money (the perps sub-skill handles its own confirmations).
+- The market read is **descriptive, never advice**. No buy/sell calls. The Kronos odds are model estimates — present them as such.
 
 ## FIRST ACTION (on invoke — do this immediately, don't wait)
 
-1. **Run the desk snapshot.** Run `python3 market_update.py` (in this skill's directory). With no API keys it prints a full data set — tracked assets (price/24h/funding/OI), key metrics (mcap/volume/dominance/ETH-BTC ratio), top movers, sentiment (Fear & Greed, Altcoin Season), stablecoin supply + de-peg, and recent headlines — plus embedded instructions for the briefing format.
-2. **Show the dashboard, then add your read.** The script prints the dashboard already written in **Markdown** (headers, bullet rows, gauge bars). Output it to the user **as Markdown, exactly as printed** — do NOT wrap it in a code block, and do NOT reword, drop, or reorder lines. Then follow the script's embedded format to append **### 📈 Analytics** (bulleted support/resistance flagged as YOUR estimates + trend + cycle), **### ⚖️ Verdict** (a **bold** risk-on/off lead + plain-text bottom-line + a Conviction badge with a colored dot), and a prominent **### 👉 What now?** with **1️⃣ Trade memes · 2️⃣ Trade perps**. Descriptive, not advice — no buy/sell calls.
-3. **Offer the fork (numbered):** "What do you want to do? **1) Trade memes  2) Trade perps**"
+1. **Run the desk snapshot:** `python3 market_update.py` (in this skill's directory). It prints, keyless:
+   - a fenced **Assets overview** card — for each asset: live price + Kronos odds of breaking the next round level within the horizon (e.g. `BTC: $64,323 · 🟢 70% odds → $65,000 in 4h`),
+   - raw headlines + a market-context line, plus the exact format to render the rest.
+2. **Show the dashboard, then build the rest.** Print everything above the `[AGENT INSTRUCTIONS]` line **AS-IS, including the ``` code fences** around the assets (the fences stop the lines collapsing — never strip them). Then follow the embedded instructions to add **### 📰 Headlines** (tag each 🟢 bullish / 🔴 bearish / ⚪ neutral), **### ⚖️ Verdict** (a bold Risk-on/off/Mixed lead + one-paragraph read grounded in the odds and the hidden market-context line + a Conviction badge), and **### 👉 What now?**. Never invent or alter a number from the card.
+3. **Offer the fork (numbered):** "What now? **1) More analytics** (pick an asset)  **2) Copy-trade perps**"
 
-## Branch A — PERPS
+## Branch A — MORE ANALYTICS
+
+1. If the user picks analytics, ask which asset (numbered): **1) BTC  2) ETH  3) BNB  4) HYPE  5) SOL  6) GOLD**.
+2. Run `python3 market_update.py analytics <ASSET>`. It prints that asset's spot, the Kronos forecast range + odds + close-up probability, and the recent 24h range, followed by the exact Analytics format.
+3. Render **### 📈 <ASSET> Analytics _(my estimates — not advice)_** with Support / Resistance / Trend / Cycle, grounded ONLY in the numbers the script printed — flag them as estimates, never fabricate.
+4. Then offer to roll into perps for that asset: "Want to copy-trade <ASSET> perps? **1) Yes  2) Back to market**" (if SOL, note its perps are coming soon).
+
+## Branch B — COPY-TRADE PERPS
 
 1. Ask which asset (numbered): **1) BTC  2) ETH  3) BNB  4) HYPE  5) GOLD.** (SOL appears in the pulse but its perps are coming soon — if asked, say not available yet.)
 2. Map the choice to its skill repo:
@@ -29,48 +39,17 @@ This is the single entry point a new user hits. Your job: give them a live read 
    - HYPE → `https://github.com/superpowerdevk/superclaw-perps-hype`
    - GOLD → `https://github.com/superpowerdevk/superclaw-perps-gold`
 3. **Install-on-demand:** if that skill isn't already installed, install it with `install <url>`.
-4. **Hand off.** Let that skill run its own onboarding (it will generate the agent wallet and print the 4-step setup, then start, and supports "tell me about this agent"). Do NOT duplicate perps logic here — just route the user in and let the perps skill drive.
-
-## Branch B — MEMES
-
-**Prerequisite gate — check before anything else:** the user needs the **OKX agentic wallet + DEX swap** installed and the wallet set up.
-- If the OKX skills aren't installed: `npx skills add okx/onchainos-skills`, then walk the user through wallet setup (login / email OTP) using the `okx-agentic-wallet` skill. Only continue once the wallet is ready.
-
-Then:
-1. **Discover.** Run **Trenches Scout** (install `https://github.com/superpowerdevk/superclaw-trenches-scout` first if it isn't present). Take its signal-ranked candidates with each token's symbol, **contract address**, and chain. Never invent a token address — it must come from Scout.
-2. **Present the picks as a NUMBERED list, top-signal pick first.** Example format:
-   ```
-   Top SuperClaw picks (signal-ranked):
-   1) $WIF — 4 smart wallets, 1 KOL   ← top pick
-   2) $vibecat — strongest smart-money cluster
-   3) $TOKEN — <one-line reason>
-   ```
-   Then the blunt one-line meme-risk warning (can rug, go to zero, or become unsellable; SL/TP is best-effort).
-3. **Lead with the action — offer to buy the #1 pick first (numbered):**
-   "Want me to buy the **#1 pick ($WIF)**?
-   **1) Yes — buy $WIF
-   2) Pick a different one (reply with its number above)
-   3) Not now**"
-   This is the SuperClaw **trader** — it executes. Do NOT stop at "decide for yourself / execute manually on GMGN"; once the user picks a token, continue straight into the buy flow below. If they choose option 2, ask which number; if 3, stop politely.
-4. **Ask the buy amount:** "How much **USDT** do you want to put in?"
-5. **Ask stop loss (numbered):** "Stop loss at — **1) 5%  2) 10%  3) 15%  4) higher (tell me)**"
-6. **Ask take profit (numbered):** "Take profit at — **1) 5%  2) 10%  3) 15%  4) higher (tell me)**"
-7. **Ask the check interval (numbered):** "How often should I check the price for your SL/TP? **1) 2 min (recommended for memes)  2) 5 min  3) 10 min  4) 15 min  5) 30 min  6) 1 hour  7) 4 hours  8) 12 hours  9) daily.** Memes move fast — pick 1 unless you have a reason not to."
-8. **Buy** via `okx-dex-swap`: resolve the token address → `swap quote` → show the quote (token, USDT in, expected out, price impact, fees) and **get explicit confirmation** → `swap execute`. Respect the swap skill's safety gates: **honeypot → STOP** and tell the user; **price impact > 5% or high tax → warn and require explicit confirmation.**
-9. **Arm SL/TP.** Record the entry price. Set the recurring price check at the chosen interval. On each check, fetch the current price (`okx-dex-swap swap quote`, or GMGN). If price ≤ entry × (1 − SL%) → **sell all** via `swap execute` (stop-loss hit). If price ≥ entry × (1 + TP%) → **sell all** (take-profit hit). After a fill, stop the schedule. Keep the schedule running until SL or TP triggers.
-10. **Summarize:** token, USDT spent, entry price, SL and TP levels, and the check interval — and remind them they can say "sell now" or "cancel" anytime.
+4. **Hand off.** Let that skill run its own onboarding (it generates the agent wallet, prints the 4-step setup, then starts, and supports "tell me about this agent"). Do NOT duplicate perps logic here — route the user in and let the perps skill drive.
 
 ## Hard rules
 
-- Money is spent in **USDT/USDC** — always confirm the exact amount before any `swap execute`.
-- **Always confirm before executing** any swap (show the quote first).
-- Respect `okx-dex-swap` safety gates: honeypot = stop; high price impact / tax = warn + explicit confirm.
-- At the meme buy step, state plainly: **memecoins can go to zero, rug, or become unsellable; SL/TP is best-effort** — a periodic price check can miss a fast dump and may not fill if liquidity dries up.
-- This is **not investment advice**; no profit is guaranteed; the user bears all risk. Keep the market TLDR descriptive, never prescriptive.
-- Never fabricate a token contract address. If you can't verify it from Scout/OKX, stop.
-- This skill never holds funds or trades itself — it drives the sub-skills and confirms with the user at each money step.
+- This skill **forecasts and routes only** — it never holds funds, never places trades, never holds keys. All execution happens inside the perps sub-skills, which run their own confirmations.
+- The market read is **not investment advice**; the Kronos odds are model estimates; no outcome is guaranteed; the user bears all risk. Keep everything descriptive, never prescriptive.
+- Never invent or change a number from the dashboard or the analytics script. If a value is n/a (e.g. Kronos offline, GOLD forecast unavailable), say so plainly — don't fabricate.
+- Present all choices as numbered menus; confirm before routing into anything that will spend money.
 
-## Notes
+## Dependencies & notes
 
-- All market data is keyless: Hyperliquid (prices/derivs, unlimited) + CoinMarketCap (regime indicators, rate-limited free tier — one pulse per request is fine).
-- If a needed sub-skill fails to install, tell the user plainly and offer the manual install URL/command rather than pretending it's set up.
+- **Kronos sidecar:** the per-asset odds come from the Kronos forecast sidecar. Set `KRONOS_URL` (env) to the deployed sidecar URL. If it's unset or unreachable, the dashboard **degrades gracefully** — it shows live prices and a "forecast offline" note instead of odds, and the rest of the flow still works.
+- All other market data is keyless: Hyperliquid (spot), CoinMarketCap trial-pro-api (regime indicators), DefiLlama (stablecoins), RSS (headlines).
+- If a needed perps sub-skill fails to install, tell the user plainly and offer the manual install URL/command rather than pretending it's set up.
