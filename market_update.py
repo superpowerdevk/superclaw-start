@@ -124,7 +124,7 @@ def _sparkline(path) -> str:
 
 
 def _lean(k: dict | None):
-    """Directional conviction from the 24h close probability."""
+    """Directional lean from the 24h close probability."""
     up = (k or {}).get("prob_up_long")
     if up is None:
         return "⚪", "Neutral"
@@ -135,10 +135,14 @@ def _lean(k: dict | None):
     return "🟡", "Neutral"
 
 
-def _conv(k: dict, span: str) -> int:
-    """Conviction in the leaned direction over a horizon ('long'/'short')."""
+def _dir_conv(k: dict, span: str):
+    """Per-horizon (direction, conviction%, arrow). Conviction is always the majority
+    side (>=50), and the arrow is that side — so it can't contradict the forecast."""
     up = k.get(f"prob_up_{span}", 50)
-    return int(up if k.get("direction") == "up" else 100 - up)
+    direction = "up" if up >= 50 else "down"
+    conv = int(up if direction == "up" else 100 - up)
+    arrow = "↑" if direction == "up" else "↓"
+    return direction, conv, arrow
 
 
 def _asset_line(label: str, spot: float | None, k: dict | None) -> str:
@@ -149,10 +153,10 @@ def _asset_line(label: str, spot: float | None, k: dict | None) -> str:
         return f"**{label}:** n/a{soon}"
     if k and k.get("prob_up_long") is not None and k.get("exp_close"):
         dot, _ = _lean(k)
-        arrow = "↑" if k.get("direction") == "up" else "↓"
-        hl, hs = k.get("horizon_long", 24), k.get("horizon_short", 4)
-        return (f"**{label}:** {_price(spot)} · {dot} {_conv(k, 'long')}% {arrow} → "
-                f"~{_price(float(k['exp_close']))} in {hl}h ({_conv(k, 'short')}% {arrow} {hs}h){soon}")
+        _, conv, arrow = _dir_conv(k, "long")
+        hl = k.get("horizon_long", 24)
+        return (f"**{label}:** {_price(spot)} · {dot} {conv}% {arrow} → "
+                f"~{_price(float(k['exp_close']))} in {hl}h{soon}")
     return f"**{label}:** {_price(spot)} · ⚪ forecast n/a{soon}"
 
 
@@ -160,12 +164,13 @@ def _top_setup(k: dict) -> str | None:
     cand = [(lab, d) for lab, d in k.items() if d and d.get("prob_up_long") is not None]
     if not cand:
         return None
-    # strongest conviction in either direction
-    cand.sort(key=lambda x: abs(x[1].get("prob_up_long", 50) - 50), reverse=True)
+    cand.sort(key=lambda x: abs(x[1]["prob_up_long"] - 50), reverse=True)
     lab, d = cand[0]
+    _, conv, arrow = _dir_conv(d, "long")
+    if conv < 62:
+        return "🎯 **Top setup:** nothing stands out — market's indecisive right now."
     dot, lean = _lean(d)
-    arrow = "↑" if d.get("direction") == "up" else "↓"
-    return (f"🎯 **Top setup:** {lab} — {dot} {lean} {_conv(d, 'long')}% {arrow}, "
+    return (f"🎯 **Top setup:** {lab} — {dot} {lean} {conv}% {arrow}, "
             f"Kronos sees ~{_price(float(d['exp_close']))} over {d.get('horizon_long', 24)}h")
 
 
@@ -345,10 +350,10 @@ def cmd_analytics(label: str) -> None:
     if k and k.get("exp_close"):
         hl, hs = k.get("horizon_long", 24), k.get("horizon_short", 4)
         dot, lean = _lean(k)
-        arrow = "↑" if k.get("direction") == "up" else "↓"
-        L.append(f"Kronos lean: {dot} **{lean}** {arrow} — {_conv(k, 'long')}% conviction over {hl}h "
-                 f"({_conv(k, 'short')}% over {hs}h)")
-        L.append(f"Forecast price ({hl}h): ~{_price(float(k['exp_close']))} "
+        _, cl, al = _dir_conv(k, "long")
+        _, cs, as_ = _dir_conv(k, "short")
+        L.append(f"Kronos lean: {dot} **{lean}** — {cl}% {al} over {hl}h · {cs}% {as_} over {hs}h")
+        L.append(f"Forecast ({hl}h): ~{_price(float(k['exp_close']))} "
                  f"· range ~{_price(float(k['exp_low']))}–{_price(float(k['exp_high']))}")
         spark = _sparkline(k.get("path"))
         if spark:
